@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TORA DEX</title>
+  <script src="https://cdn.jsdelivr.net/npm/web3@1.8.2/dist/web3.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Orbitron', sans-serif;
+      background: #0a0a0a;
+      color: #fff;
+      overflow-x: hidden;
+    }
+
+    canvas#rain {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: -1;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 30px;
+      background: #111;
+      box-shadow: 0 0 10px #0af;
+    }
+
+    .title {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #0af;
+    }
+
+    .connect-wrapper {
+      text-align: right;
+    }
+
+    #connectBtn, #disconnectBtn {
+      padding: 10px 18px;
+      margin-left: 10px;
+      background: #0af;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .wallet-info {
+      font-size: 0.9rem;
+      color: #ccc;
+      margin-top: 5px;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: 60px auto;
+      padding: 30px;
+      background: #1a1a1a;
+      border-radius: 16px;
+      box-shadow: 0 0 20px #0af4;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+
+    .input-group {
+      margin-bottom: 16px;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 1rem;
+      background: #333;
+      color: white;
+    }
+
+    .swapBtn {
+      width: 100%;
+      padding: 12px;
+      background-color: #0af;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .swapBtn:hover {
+      background-color: #08c;
+    }
+
+    #status {
+      margin-top: 30px;
+      text-align: center;
+      font-weight: bold;
+      color: #0f0;
+    }
+
+    @media (max-width: 600px) {
+      .header { flex-direction: column; align-items: flex-start; }
+      .connect-wrapper { align-items: flex-start; margin-top: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="rain"></canvas>
+
+  <div class="header">
+    <div class="title">TORA DEX</div>
+    <div class="connect-wrapper">
+      <button id="connectBtn" onclick="connectWallet()">Connect</button>
+      <button id="disconnectBtn" onclick="disconnectWallet()" style="display:none;">Disconnect</button>
+      <div id="walletDisplay" class="wallet-info">Wallet not connected</div>
+    </div>
+  </div>
+
+  <div class="container">
+    <label for="ethAmount">Buy TORA (Send ETH):</label>
+    <div class="input-group">
+      <input type="number" id="ethAmount" min="0.01" step="0.001" placeholder="Amount in ETH" />
+    </div>
+    <button class="swapBtn" onclick="buyTora()">Buy TORA</button>
+
+    <div style="margin-top: 40px;">
+      <label for="toraAmount">Sell TORA (Receive ETH):</label>
+      <div class="input-group">
+        <input type="number" id="toraAmount" min="10" step="1" placeholder="Amount of TORA" />
+      </div>
+      <button class="swapBtn" onclick="sellTora()">Sell TORA</button>
+    </div>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const toraDexAddress = "0x481dB2447B3bE1817c980717c6ac9669170742A4";
+    const toraTokenAddress = "0x2bd73CCaC4194Fe41481e49935Aa972AA69e4A6E";
+    const SEPOLIA_CHAIN_ID = "0xaa36a7";
+
+    let web3, accounts, toraDexContract, toraTokenContract;
+
+    const toraDexAbi = [
+      { "inputs": [], "name": "buyTora", "outputs": [], "stateMutability": "payable", "type": "function" },
+      { "inputs": [{ "internalType": "uint256", "name": "amount", "type": "uint256" }], "name": "sellTora", "outputs": [], "stateMutability": "nonpayable", "type": "function" }
+    ];
+
+    const erc20Abi = [
+      { "constant": true, "inputs": [{ "name": "_owner", "type": "address" }], "name": "balanceOf", "outputs": [{ "name": "balance", "type": "uint256" }], "type": "function" },
+      { "constant": false, "inputs": [{ "name": "_spender", "type": "address" }, { "name": "_value", "type": "uint256" }], "name": "approve", "outputs": [{ "name": "success", "type": "bool" }], "type": "function" }
+    ];
+
+    async function connectWallet() {
+      if (typeof window.ethereum === "undefined") {
+        alert("Please install MetaMask to continue.");
+        return;
+      }
+
+      try {
+        accounts = await ethereum.request({ method: "eth_requestAccounts" });
+        web3 = new Web3(window.ethereum);
+
+        const currentChainId = await ethereum.request({ method: "eth_chainId" });
+        if (currentChainId !== SEPOLIA_CHAIN_ID) {
+          await ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA_CHAIN_ID }] });
+        }
+
+        toraDexContract = new web3.eth.Contract(toraDexAbi, toraDexAddress);
+        toraTokenContract = new web3.eth.Contract(erc20Abi, toraTokenAddress);
+
+        await updateBalances();
+
+        document.getElementById("connectBtn").style.display = "none";
+        document.getElementById("disconnectBtn").style.display = "inline-block";
+        setStatus("Wallet connected successfully!");
+      } catch (err) {
+        console.error(err);
+        setStatus("Error connecting to wallet.");
+      }
+    }
+
+    async function disconnectWallet() {
+      accounts = null;
+      document.getElementById("walletDisplay").textContent = "Wallet disconnected";
+      document.getElementById("connectBtn").style.display = "inline-block";
+      document.getElementById("disconnectBtn").style.display = "none";
+      setStatus("Disconnected.");
+    }
+
+    async function updateBalances() {
+      const eth = parseFloat(web3.utils.fromWei(await web3.eth.getBalance(accounts[0]), 'ether'));
+      const tora = parseFloat(web3.utils.fromWei(await toraTokenContract.methods.balanceOf(accounts[0]).call(), 'ether'));
+      const addrShort = `${accounts[0].slice(0, 6)}...${accounts[0].slice(-4)}`;
+      document.getElementById("walletDisplay").textContent = `${addrShort} | ${eth.toFixed(4)} ETH | ${tora.toFixed(2)} TORA`;
+    }
+
+    async function buyTora() {
+      const ethAmount = parseFloat(document.getElementById("ethAmount").value);
+      if (!ethAmount || ethAmount < 0.01) return setStatus("Minimum value: 0.01 ETH.");
+      try {
+        const value = web3.utils.toWei(ethAmount.toString(), "ether");
+        await toraDexContract.methods.buyTora().send({ from: accounts[0], value });
+        setStatus(`Bought TORA with ${ethAmount} ETH!`);
+        await updateBalances();
+      } catch (e) {
+        console.error(e);
+        setStatus("Error buying TORA.");
+      }
+    }
+
+    async function sellTora() {
+      const toraAmount = parseFloat(document.getElementById("toraAmount").value);
+      if (!toraAmount || toraAmount < 10) return setStatus("Minimum to sell: 10 TORA.");
+      try {
+        const amountWei = web3.utils.toWei(toraAmount.toString(), "ether");
+        await toraTokenContract.methods.approve(toraDexAddress, amountWei).send({ from: accounts[0] });
+        await toraDexContract.methods.sellTora(amountWei).send({ from: accounts[0] });
+        setStatus(`Sold ${toraAmount} TORA!`);
+        await updateBalances();
+      } catch (e) {
+        console.error(e);
+        setStatus("Error selling TORA.");
+      }
+    }
+
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg;
+    }
+
+    // Rain animation with lightning
+    document.addEventListener("DOMContentLoaded", () => {
+      const canvas = document.getElementById("rain");
+      const ctx = canvas.getContext("2d");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const drops = Array.from({ length: 500 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        l: Math.random(),
+        xs: -2 + Math.random() * 4,
+        ys: 8 + Math.random() * 10
+      }));
+
+      function drawRain() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = "rgba(174,194,224,0.5)";
+        ctx.lineWidth = 1;
+        ctx.lineCap = "round";
+        for (const d of drops) {
+          ctx.beginPath();
+          ctx.moveTo(d.x, d.y);
+          ctx.lineTo(d.x + d.l * d.xs, d.y + d.l * d.ys);
+          ctx.stroke();
+        }
+        moveRain();
+      }
+
+      function moveRain() {
+        for (const d of drops) {
+          d.x += d.xs;
+          d.y += d.ys;
+          if (d.x > canvas.width || d.y > canvas.height) {
+            d.x = Math.random() * canvas.width;
+            d.y = -20;
+          }
+        }
+      }
+
+      function lightning() {
+        if (Math.random() < 0.01) {
+          canvas.style.background = "rgba(255,255,255,0.1)";
+          setTimeout(() => canvas.style.background = "transparent", 100);
+        }
+      }
+
+      function animate() {
+        drawRain();
+        lightning();
+        requestAnimationFrame(animate);
+      }
+
+      animate();
+    });
+  </script>
+</body>
+</html>
